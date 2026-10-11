@@ -261,38 +261,67 @@ def is_local_path(path: str) -> bool:
 
 
 def load_models(model_size: str, weight_path: str = None, model_path: str = None):
-    """Load all models for a specific model size."""
+    """
+    Load all OmniSVG models.
+
+    IMPORTANT:
+    1. SketchDecoder loads Qwen2.5-VL on CPU and resizes its vocabulary.
+    2. OmniSVG checkpoint is loaded BEFORE Accelerate dispatch.
+    3. OmniSVG checkpoint keys contain an extra "transformer." prefix,
+       which is removed before loading into sketch_decoder.transformer.
+    4. Only after all weights are loaded successfully is the model
+       dispatched across GPU/CPU.
+    """
     global tokenizer, processor, sketch_decoder, svg_tokenizer, current_model_size
-    
+
     if weight_path is None:
-        weight_path = get_config_value(model_size, 'huggingface', 'omnisvg_model')
+        weight_path = get_config_value(
+            model_size, 'huggingface', 'omnisvg_model'
+        )
+
     if model_path is None:
-        model_path = get_config_value(model_size, 'huggingface', 'qwen_model')
-    
+        model_path = get_config_value(
+            model_size, 'huggingface', 'qwen_model'
+        )
+
     print(f"\n{'='*60}")
     print(f"Loading {model_size} Model")
     print(f"{'='*60}")
     print(f"Qwen model: {model_path}")
     print(f"OmniSVG weights: {weight_path}")
     print(f"Precision: {DTYPE}")
-    
-    # Load Qwen tokenizer and processor
-    print("\n[1/3] Loading tokenizer and processor...")
+
+    # --------------------------------------------------------
+    # 1. Load Qwen tokenizer and processor
+    # --------------------------------------------------------
+
+    print("\n[1/4] Loading tokenizer and processor...")
+
     tokenizer = AutoTokenizer.from_pretrained(
-        model_path, 
+        model_path,
         padding_side="left",
         trust_remote_code=True
     )
+
     processor = AutoProcessor.from_pretrained(
-        model_path, 
+        model_path,
         padding_side="left",
         trust_remote_code=True
     )
+
     processor.tokenizer.padding_side = "left"
+
     print("Tokenizer and processor loaded successfully!")
 
-    # Initialize sketch decoder with model_size
-    print("\n[2/3] Initializing SketchDecoder...")
+    # --------------------------------------------------------
+    # 2. Initialize SketchDecoder
+    #
+    # decoder.py now loads the Qwen model on CPU, resizes the
+    # vocabulary to 197000, but DOES NOT dispatch it yet.
+    # --------------------------------------------------------
+
+    print("\n[2/4] Initializing SketchDecoder...")
+
     sketch_decoder = SketchDecoder(
         config_path=CONFIG_PATH,
         model_path=model_path,
@@ -301,46 +330,189 @@ def load_models(model_size: str, weight_path: str = None, model_path: str = None
         text_len=config.get('text', {}).get('max_length', 200),
         torch_dtype=DTYPE
     )
-    
-    # Load OmniSVG weights
-    print("\n[3/3] Loading OmniSVG weights...")
-    
+
+    # --------------------------------------------------------
+    # 3. Load OmniSVG checkpoint BEFORE Accelerate dispatch
+    # --------------------------------------------------------
+
+    print("\n[3/4] Loading OmniSVG weights...")
+
     if is_local_path(weight_path):
-        bin_path = os.path.join(weight_path, "pytorch_model.bin")
+        if os.path.isdir(weight_path):
+            bin_path = os.path.join(
+                weight_path,
+                "pytorch_model.bin"
+            )
+        else:
+            bin_path = weight_path
+
         if not os.path.exists(bin_path):
-            if os.path.exists(weight_path) and weight_path.endswith('.bin'):
-                bin_path = weight_path
-            else:
-                raise FileNotFoundError(
-                    f"Could not find pytorch_model.bin at {weight_path}. "
-                    f"Please provide a valid local path or HuggingFace repo ID."
-                )
+            raise FileNotFoundError(
+                f"Could not find OmniSVG checkpoint at: {bin_path}"
+            )
+
         print(f"Loading weights from local path: {bin_path}")
+
     else:
-        print(f"Downloading weights from HuggingFace: {weight_path}")
-        bin_path = download_model_weights(weight_path, "pytorch_model.bin")
-    
-    state_dict = torch.load(bin_path, map_location='cpu')
-    sketch_decoder.load_state_dict(state_dict)
-    print("OmniSVG weights loaded successfully!")
-    
-    # Note: We don't move to a specific device here if using device_map="auto"
-    # The model is already distributed by accelerate
+        print(
+            f"Downloading weights from HuggingFace: {weight_path}"
+        )
+
+        bin_path = download_model_weights(
+            weight_path,
+            "pytorch_model.bin"
+        )
+
+    print("\nReading OmniSVG checkpoint into CPU RAM...")
+
+    state_dict = torch.load(
+        bin_path,
+        map_location="cpu"
+    )
+
+    print(
+        f"Checkpoint contains {len(state_dict)} tensors."
+    )
+
+    # --------------------------------------------------------
+    # The OmniSVG checkpoint was saved with keys such as:
+    #
+    #   transformer.model.embed_tokens.weight
+    #   transformer.lm_head.weight
+    #   transformer.visual....
+    #
+    # But sketch_decoder.transformer expects:
+    #
+    #   model.embed_tokens.weight
+    #   lm_head.weight
+    #   visual....
+    #
+    # Remove the prefix.
+    # --------------------------------------------------------
+
+    checkpoint_keys = list(state_dict.keys())
+
+    if checkpoint_keys and all(
+        key.startswith("transformer.")
+        for key in checkpoint_keys
+    ):
+        print(
+            "\nRemoving 'transformer.' prefix "
+            "from checkpoint keys..."
+        )
+
+        state_dict = {
+            key[len("transformer."):]: value
+            for key, value in state_dict.items()
+        }
+
+    else:
+        print(
+            "\nWARNING: Not every checkpoint key starts "
+            "with 'transformer.'."
+        )
+
+    # Show a few processed keys.
+    print("\nFirst checkpoint keys after processing:")
+
+    for key in list(state_dict.keys())[:10]:
+        print(f"  {key}")
+
+    # --------------------------------------------------------
+    # Load into the ACTUAL underlying Qwen model.
+    # --------------------------------------------------------
+
+    print("\nLoading OmniSVG checkpoint into model...")
+
+    missing_keys, unexpected_keys = (
+        sketch_decoder.transformer.load_state_dict(
+            state_dict,
+            strict=False
+        )
+    )
+
+    print("\n" + "=" * 60)
+    print("OMNISVG CHECKPOINT LOAD RESULT")
+    print("=" * 60)
+
+    print(f"Missing keys:    {len(missing_keys)}")
+    print(f"Unexpected keys: {len(unexpected_keys)}")
+
+    if missing_keys:
+        print("\nFirst missing keys:")
+        for key in missing_keys[:20]:
+            print(f"  {key}")
+
+    if unexpected_keys:
+        print("\nFirst unexpected keys:")
+        for key in unexpected_keys[:20]:
+            print(f"  {key}")
+
+    if missing_keys or unexpected_keys:
+        raise RuntimeError(
+            "\nOmniSVG checkpoint was NOT loaded cleanly.\n"
+            f"Missing keys: {len(missing_keys)}\n"
+            f"Unexpected keys: {len(unexpected_keys)}\n"
+            "\nDo not continue to inference until this is fixed."
+        )
+
+    print("\n[OK] ALL OmniSVG weights loaded successfully.")
+
+    # We no longer need the huge state_dict in RAM.
+    del state_dict
+    gc.collect()
+
+    print("Checkpoint dictionary released from RAM.")
+
+    # --------------------------------------------------------
+    # 4. NOW dispatch the fully loaded model
+    # --------------------------------------------------------
+
+    print("\n[4/4] Dispatching model across GPU and CPU...")
+
+    from accelerate import infer_auto_device_map, dispatch_model
+
+    max_memory = {
+        0: "14GiB",
+        "cpu": "45GiB",
+    }
+
+    print("\nCalculating device map...")
+
+    device_map = infer_auto_device_map(
+        sketch_decoder.transformer,
+        max_memory=max_memory,
+    )
+
+    print("\nComputed device map:")
+    print(device_map)
+
+    print("\nDispatching model...")
+
+    sketch_decoder.transformer = dispatch_model(
+        sketch_decoder.transformer,
+        device_map=device_map,
+    )
+
     sketch_decoder = sketch_decoder.eval()
-    
-    # Initialize SVG tokenizer with model_size
-    svg_tokenizer = SVGTokenizer(CONFIG_PATH, model_size=model_size)
-    
+
+    # --------------------------------------------------------
+    # Initialize SVG tokenizer
+    # --------------------------------------------------------
+
+    svg_tokenizer = SVGTokenizer(
+        CONFIG_PATH,
+        model_size=model_size
+    )
+
     current_model_size = model_size
-    
-    # Print device distribution info
-    print(f"\n{get_model_devices_info()}")
+
+    print("\n" + get_model_devices_info())
     print(f"Input device will be: {get_model_input_device()}")
-    
+
     print("\n" + "="*60)
     print(f"All {model_size} models loaded successfully!")
     print("="*60 + "\n")
-
 
 def detect_text_subtype(text_prompt):
     """Auto-detect text prompt subtype"""
@@ -610,6 +782,32 @@ def generate_candidates(inputs, task_type, subtype, temperature, top_p, top_k, r
                     current_ids_cpu,
                     torch.full((1, 1), EOS_TOKEN_ID, device='cpu')
                 ], dim=1)
+
+                if verbose:
+                    token_list = current_ids_cpu[0].tolist()
+                    structural_ids = {
+                        152067: "MOVE",
+                        152068: "LINE",
+                        152069: "CURVE",
+                        152070: "ARC",
+                        152071: "CLOSE",
+                    }
+
+                    structural_counts = {
+                        name: token_list.count(token_id)
+                        for token_id, name in structural_ids.items()
+                    }
+
+                    print("\n  Generated token diagnostics:")
+                    print(f"    Token count: {len(token_list)}")
+                    print(f"    Min token: {min(token_list)}")
+                    print(f"    Max token: {max(token_list)}")
+                    print(f"    Unique tokens: {len(set(token_list))}")
+                    print(f"    SVG structural tokens: {structural_counts}")
+                    print(
+                        "    Structural token total: "
+                        f"{sum(structural_counts.values())}"
+                    )
 
                 generated_xy = svg_tokenizer.process_generated_tokens(fake_wrapper)
                 if len(generated_xy) == 0:
