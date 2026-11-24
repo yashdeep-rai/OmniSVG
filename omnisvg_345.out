@@ -1,0 +1,137 @@
+Job ID: 345
+Node: iiitdmk-cse-SDI200F0A-48
+Starting OmniSVG inference...
+Thu Nov 12 03:32:55 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 595.91.07              Driver Version: 595.91.07      CUDA Version: 13.2     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA RTX 6000 Ada Gene...    Off |   00000000:98:00.0 Off |                  Off |
+| 57%   78C    P2            166W /  300W |    2599MiB /  49140MiB |    100%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    0   N/A  N/A           14453      G   /usr/bin/gnome-shell                     99MiB |
+|    0   N/A  N/A           15043      G   /usr/bin/Xwayland                         7MiB |
+|    0   N/A  N/A          493931      C   ...Master Run/project/bin/python       2420MiB |
+|    0   N/A  N/A         2388535    C+G   ptyxis                                   26MiB |
++-----------------------------------------------------------------------------------------+
+============================================================
+OmniSVG Inference Script
+============================================================
+Task: text-to-svg
+Model Size: 8B
+Input: test_prompt.txt
+Output: output_complex
+Default Device: cuda:0
+Precision: torch.bfloat16
+Num Candidates: 1
+Max Length: 512
+============================================================
+
+============================================================
+Loading 8B Model
+============================================================
+Qwen model: /home/rudra/My_Projects/models/Qwen2.5-VL-7B-Instruct
+OmniSVG weights: /home/rudra/My_Projects/models/OmniSVG1.1_8B/pytorch_model.bin
+Precision: torch.bfloat16
+
+[1/4] Loading tokenizer and processor...
+Tokenizer and processor loaded successfully!
+
+[2/4] Initializing SketchDecoder...
+Loading Qwen2.5-VL from: /home/rudra/My_Projects/models/Qwen2.5-VL-7B-Instruct
+Loading base model completely on CPU...
+Base Qwen model loaded on CPU.
+Resizing vocabulary from 152064 to 197000...
+Vocabulary resized successfully.
+Input embedding shape: (197000, 3584)
+LM head shape: (197000, 3584)
+
+SketchDecoder initialized on CPU.
+OmniSVG weights should be loaded before dispatch.
+
+[3/4] Loading OmniSVG weights...
+Loading weights from local path: /home/rudra/My_Projects/models/OmniSVG1.1_8B/pytorch_model.bin
+
+Reading OmniSVG checkpoint into CPU RAM...
+Checkpoint contains 729 tensors.
+
+Removing 'transformer.' prefix from checkpoint keys...
+
+First checkpoint keys after processing:
+  visual.patch_embed.proj.weight
+  visual.blocks.0.norm1.weight
+  visual.blocks.0.norm2.weight
+  visual.blocks.0.attn.qkv.weight
+  visual.blocks.0.attn.qkv.bias
+  visual.blocks.0.attn.proj.weight
+  visual.blocks.0.attn.proj.bias
+  visual.blocks.0.mlp.gate_proj.weight
+  visual.blocks.0.mlp.gate_proj.bias
+  visual.blocks.0.mlp.up_proj.weight
+
+Loading OmniSVG checkpoint into model...
+
+============================================================
+OMNISVG CHECKPOINT LOAD RESULT
+============================================================
+Missing keys:    0
+Unexpected keys: 0
+
+[OK] ALL OmniSVG weights loaded successfully.
+Checkpoint dictionary released from RAM.
+
+[4/4] Dispatching model across GPU and CPU...
+
+Calculating device map...
+
+Computed device map:
+OrderedDict([('', 0)])
+
+Dispatching model...
+
+Model distributed across: ['cuda:0']
+Input device will be: cuda:0
+
+============================================================
+All 8B models loaded successfully!
+============================================================
+
+
+Found 1 prompts to process
+============================================================
+
+[1/1] Processing: A blue and gray database icon is overlaid with a yellow star in the bottom right...
+  Subtype: icon
+  Params: temp=0.3, top_p=0.9, top_k=30, rep=1.05
+  Using input device: cuda:0
+
+  Generated token diagnostics:
+    Token count: 512
+    Min token: 151643
+    Max token: 196999
+    Unique tokens: 127
+    SVG structural tokens: {'MOVE': 16, 'LINE': 26, 'CURVE': 30, 'ARC': 4, 'CLOSE': 16}
+    Structural token total: 92
+  Found valid candidate 1 with 8 paths
+  ✓ Generated 1 candidates in 15.07s
+  Saved: 0001_A blue and gray database icon is overlaid with a y.svg
+
+============================================================
+Text-to-SVG Complete!
+  Success: 1/1
+  Failed: 0/1
+  Output: output_complex
+============================================================
+
+Done!
+Inference completed.

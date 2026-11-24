@@ -473,7 +473,7 @@ def load_models(model_size: str, weight_path: str = None, model_path: str = None
     from accelerate import infer_auto_device_map, dispatch_model
 
     max_memory = {
-        0: "14GiB",
+        0: "32GiB",
         "cpu": "45GiB",
     }
 

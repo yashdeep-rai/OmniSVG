@@ -1,0 +1,5 @@
+rank,candidate,ssim,mae,status
+1,/home/rudra/My_Projects/OmniSVG/pipeline_runs/20261124_144039/omnisvg/av_candidate_4.svg,0.203548,166.493744,ok
+2,/home/rudra/My_Projects/OmniSVG/pipeline_runs/20261124_144039/omnisvg/av_candidate_1.svg,0.187890,188.360062,ok
+3,/home/rudra/My_Projects/OmniSVG/pipeline_runs/20261124_144039/omnisvg/av_candidate_2.svg,0.169028,193.123520,ok
+4,/home/rudra/My_Projects/OmniSVG/pipeline_runs/20261124_144039/omnisvg/av_candidate_3.svg,0.154726,165.735977,ok
